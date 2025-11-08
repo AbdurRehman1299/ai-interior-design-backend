@@ -1,13 +1,30 @@
+# Use an official Python image
 FROM python:3.10-slim
 
+# Set the working directory inside the container
 WORKDIR /app
 
+# Copy and install your requirements
 COPY requirements.txt .
-
 RUN pip install --no-cache-dir -r requirements.txt
 
+# --- FIX 3: PRE-CACHE THE TORCH MODELS ---
+# This RUN command will download the models *during the build*
+# so they are baked into the image. This makes your app start
+# instantly instead of timing out.
+RUN python -c "import torch; \
+    print('Downloading MiDaS_small model...'); \
+    torch.hub.load('intel-isl/MiDaS', 'MiDaS_small'); \
+    print('Downloading MiDaS transforms...'); \
+    torch.hub.load('intel-isl/MiDaS', 'transforms'); \
+    print('Model caching complete!')"
+
+# Copy the rest of your application code
 COPY . .
 
+# Tell Hugging Face to open port 7860
 EXPOSE 7860
 
+# Tell Gunicorn to run your app on port 7860
+# (This assumes your file is app.py and your Flask variable is app)
 CMD ["gunicorn", "--bind", "0.0.0.0:7860", "app:app"]

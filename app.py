@@ -3,7 +3,7 @@ import io
 import base64
 from typing import Tuple, List
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask_cors import CORS  # Make sure 'flask-cors' is in requirements.txt
 import requests
 from dotenv import load_dotenv
 import colorgram
@@ -21,20 +21,19 @@ app = Flask(__name__)
 # Security: Set max upload size to 16MB
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-CORS(app, resources={r"/api/*": {"origins": ["https://roomdev.vercel.app", "http://localhost:3000"]}})
+CORS(app)
 
 # --- DEPTH MODEL CONFIGURATION ---
-# Load MiDaS model for depth estimation
 print("Loading MiDaS depth estimation model...")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# Load MiDaS model (will download on first run, ~100MB)
+# This will now use the pre-cached model from the Dockerfile
+# It will no longer download it every time the app starts.
 midas = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
 midas.to(device)
 midas.eval()
 
-# Load transforms
 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 transform = midas_transforms.small_transform
 
@@ -52,22 +51,29 @@ def tuple_to_hex(rgb_tuple) -> str:
     """Convert RGB tuple to hex color string."""
     return '#{:02x}{:02x}{:02x}'.format(rgb_tuple.r, rgb_tuple.g, rgb_tuple.b)
 
+# It MUST exist and MUST return a 200 OK.
+@app.route('/', methods=['GET'])
+def health_check():
+    print("Health check successful!")
+    return jsonify({'status': 'healthy', 'message': 'Backend is running!'}), 200
+
 # --- MAIN API ENDPOINT ---
 @app.route('/api/process-image', methods=['POST'])
 def process_image():
-    # --- Print a startup message to confirm the endpoint is hit ---
-    print("\n--- Received a new request ---")
+    print("\n--- Received a new request for /api/process-image ---")
 
     if 'image' not in request.files:
+        print("Error: 'image' not in request.files")
         return jsonify({'error': 'No image file provided'}), 400
     
     file = request.files['image']
     
-    # Validate file
     if file.filename == '':
+        print("Error: No file selected (filename is empty)")
         return jsonify({'error': 'No file selected'}), 400
     
     if not allowed_file(file.filename):
+        print(f"Error: Invalid file type '{file.filename}'")
         return jsonify({'error': 'Invalid file type. Allowed types: ' + ', '.join(ALLOWED_EXTENSIONS)}), 400
     
     try:
@@ -76,18 +82,14 @@ def process_image():
 
         print("Running depth estimation...")
         
-        # Load and convert image to RGB
         img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
         img_np = np.array(img)
         
-        # Apply MiDaS transforms
         input_batch = transform(img_np).to(device)
         
-        # Run inference
         with torch.no_grad():
             prediction = midas(input_batch)
             
-            # Resize to original image size
             prediction = torch.nn.functional.interpolate(
                 prediction.unsqueeze(1),
                 size=img_np.shape[:2],
@@ -95,14 +97,10 @@ def process_image():
                 align_corners=False,
             ).squeeze()
         
-        # Convert to numpy and normalize
         depth = prediction.cpu().numpy()
         depth_normalized = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        
-        # Apply colormap for visualization
         depth_colored = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_INFERNO)
         
-        # Convert to PNG bytes
         _, buffer = cv2.imencode('.png', depth_colored)
         depth_map_bytes = buffer.tobytes()
         
@@ -111,7 +109,6 @@ def process_image():
         encoded_depth_viz = base64.b64encode(depth_map_bytes).decode('utf-8')
         depth_map_url = f"data:image/png;base64,{encoded_depth_viz}"
         
-        # Encode original image for texture
         encoded_original = base64.b64encode(image_bytes).decode('utf-8')
         original_image_url = f"data:image/png;base64,{encoded_original}"
         
@@ -121,16 +118,19 @@ def process_image():
 
         print("AI model and color extraction finished successfully.")
 
+        # --- IMPORTANT: Your frontend expects 'depthMapUrl' and 'colors' ---
+        # The frontend also expected an 'originalImageUrl' which you weren't sending.
         return jsonify({
             'depthMapUrl': depth_map_url,
+            'originalImageUrl': original_image_url, # Added this
             'colors': hex_colors
         })
 
     except Exception as e:
-        print(f"An error occurred in the try block: {e}")
+        print(f"An error occurred in the /api/process-image block: {e}")
         return jsonify({'error': str(e)}), 500
 
-# --- RUN THE SERVER ---
+# --- RUN THE SERVER (Only for local dev) ---
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5001))
     debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
