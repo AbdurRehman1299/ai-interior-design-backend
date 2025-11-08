@@ -1,6 +1,6 @@
 # Environment variables
 .env
-python-backend/.env
+backend/.env
 
 # Python
 __pycache__/
@@ -8,9 +8,10 @@ __pycache__/
 *$py.class
 *.so
 .Python
-venv/
+.venv/
 env/
 ENV/
+backend/.venv
 
 # IDEs
 .vscode/
