@@ -21,7 +21,7 @@ app = Flask(__name__)
 # Security: Set max upload size to 16MB
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-CORS(app, resources={r"/api/*": {"origins": ["https://ai-interior-design-three.vercel.app", "http://localhost:3000"]}})
+CORS(app, resources={r"/api/*": {"origins": ["https://roomdev.vercel.app", "http://localhost:3000"]}})
 
 # --- DEPTH MODEL CONFIGURATION ---
 # Load MiDaS model for depth estimation
